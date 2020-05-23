@@ -1,8 +1,10 @@
 import requests
 from bs4 import BeautifulSoup
-import re
+import os
 from random import choice
 import time
+from tqdm import tqdm
+from threading import Thread
 
 OUTPUT_DIR = './'
 
@@ -18,33 +20,54 @@ headers = {
     'Connection': 'keep-alive'
 }
 
-def img_crawler(key_word, page_num):
-    imgs_all = []
-    for page in range(1, page_num):
-        try:
-            response = requests.get(f'https://www.ebay.com/sch/i.html?_from=R40&_trksid=m570.l1313&_nkw={keyword}&_sacat=0&_pgn={page}', 
-                                    headers=headers)
 
-            soup = BeautifulSoup(response.text, 'lxml')
-            [s.extract() for s in soup('script')]
-            [s.extract() for s in soup('style')]
-            imgs = [img.get('src') for img in soup.select('img')]
-            imgs = list(filter(lambda x: '225' in x, imgs))
-            imgs = [img.replace('225', '800') for img in imgs]
-            imgs_all += imgs
+class EbayImgCrawler():
+    def __init__(self, keyword, page_num, size=800, output_dir='./'):
+        self.imgs_all = []
+        self.keyword = keyword
+        self.page_num = page_num
+        self.size = size
+        self.output_dir = output_dir
 
-            time.sleep(3) # 防止封ip
-        except:
-            break
-    return imgs_all
+    def crawl_by_page(self):
+        for page in tqdm(range(1, self.page_num + 1)):
+            try:
+                response = requests.get(
+                    f'https://www.ebay.com/sch/i.html?_from=R40&_trksid=m570.l1313&_nkw={self.keyword}&_sacat=0&_pgn={page}',
+                    headers=headers)
+                soup = BeautifulSoup(response.text, 'lxml')
+                [s.extract() for s in soup('script')]
+                [s.extract() for s in soup('style')]
+                imgs = [img.get('src') for img in soup.select('img')]
+                imgs = list(filter(lambda x: '225' in x, imgs))
+                imgs = [img.replace('225', str(self.size)) for img in imgs]
+                self.imgs_all += imgs
 
-imgs_all = img_crawler('mask', 1)
+                time.sleep(3)  # 防止封ip
+            except:
+                break
 
-def download_images(ds):
-    for idx, url in enumerate(imgs_all):
+    def download_image(self, url, idx):
         try:
             response = requests.get(url)
-            with open(os.path.join(OUTPUT_DIR, idx), 'wb') as f:
+            with open(os.path.join(self.output_dir, self.keyword + str(idx + 1) + '.jpg'), 'wb') as f:
                 f.write(response.content)
         except:
-            continue
+            pass
+
+    def main(self):
+        print('crawl image urls...')
+        self.crawl_by_page()
+        threads = []
+        print('download images...')
+        for idx, url in enumerate(self.imgs_all):
+            t = Thread(target=self.download_image, args=(url, idx))
+            t.start()
+            threads.append(t)
+        for thread in tqdm(threads):
+            thread.join()
+
+
+if __name__ == '__main__':
+    crawler = EbayImgCrawler('ipad', 3)
+    crawler.main()
